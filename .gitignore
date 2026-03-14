@@ -1,0 +1,3 @@
+.venv/
+rss_state.db
+__pycache__/
