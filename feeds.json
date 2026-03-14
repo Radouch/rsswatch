@@ -14,7 +14,25 @@
     {
       "name": "daily",
       "feeds": [
-        "https://planet.debian.org/rss20.xml"
+        "https://visionsnorth.blogspot.com/feeds/posts/default?alt=rss",
+        "https://finger-post.blog/feed/",
+        "https://jamesfitzjamesdotcom.tumblr.com/rss",
+        "https://www.thethousandthpart.com/notes?format=rss",
+        "https://arcticbookreview.blogspot.com/feeds/posts/default?alt=rss",
+        "https://wallbay89739267.wordpress.com/feed/",
+        "https://kabloonas.blogspot.com/feeds/posts/default?alt=rss",
+        "https://arctonauts.com/feed/",
+        "https://tristanaefwrites.wordpress.com/category/franklin-expedition/feed/",
+        "https://allegrarosenberg.com/polar/feed/",
+        "https://erebusandterrorfiles.blogspot.com/feeds/posts/default?alt=rss",
+        "https://laurentriolawrites.wordpress.com/feed/",
+        "https://bushpilotdhc.blogspot.com/feeds/posts/default?alt=rss",
+        "https://buildingterror.blogspot.com/feeds/posts/default?alt=rss",
+        "https://captainofterror.blogspot.cz/feeds/posts/default?alt=rss",
+        "https://70northbeset.wordpress.com/feed/",
+        "https://starvationcove.blogspot.com/feeds/posts/default?alt=rss",
+        "http://starsoverice.blogspot.com/feeds/posts/default?alt=rss",
+        "https://franklinsghost.blogspot.com/feeds/posts/default?alt=rss"
       ]
     }
   ]
