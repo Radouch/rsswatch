@@ -16,6 +16,12 @@ import requests
 DEFAULT_DB_PATH = "rss_state.db"
 SECRETS_FILENAME = "secrets.json"
 USER_AGENT = "rss-watch/1.0 (+lightweight deterministic RSS monitor)"
+FETCH_TIMEOUT = 30          # seconds, applies to feed HTTP fetches
+SEND_TIMEOUT = 20           # seconds, applies to Telegram API calls
+SEND_ATTEMPTS = 3           # attempts per Telegram message
+RETRY_BASE_DELAY = 2.0      # seconds, exponential-ish backoff base
+MAX_RETRY_AFTER = 120.0     # cap for Telegram's Retry-After hint
+MESSAGE_PACING = 1.0        # seconds between consecutive sent messages
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -143,21 +149,81 @@ def mark_seen(conn: sqlite3.Connection, group_name: str, feed_url: str, key: str
 
 
 def fetch_feed(feed_url: str) -> Any:
-    return feedparser.parse(feed_url, agent=USER_AGENT)
-
-
-def send_telegram(bot_token: str, chat_id: str, text: str, timeout: int = 20) -> None:
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    resp = requests.post(
-        url,
-        data={
-            "chat_id": chat_id,
-            "text": text,
-            "disable_web_page_preview": False,
-        },
-        timeout=timeout,
+    resp = requests.get(
+        feed_url,
+        timeout=FETCH_TIMEOUT,
+        headers={"User-Agent": USER_AGENT},
     )
     resp.raise_for_status()
+    return feedparser.parse(resp.content)
+
+
+class TelegramSendError(RuntimeError):
+    """Raised when a message cannot be delivered to the Telegram API.
+
+    The bot token never appears in the exception message because requests
+    embeds it in the request URL, including inside connection-error strings.
+    """
+
+
+def send_telegram(
+    bot_token: str,
+    chat_id: str,
+    text: str,
+    timeout: int = SEND_TIMEOUT,
+    attempts: int = SEND_ATTEMPTS,
+) -> None:
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    data = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": False,
+    }
+
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = requests.post(url, data=data, timeout=timeout)
+        except requests.RequestException as e:
+            if attempt == attempts:
+                # Do not include str(e): it can contain the URL with the
+                # bot token. The exception type name is enough for logs.
+                raise TelegramSendError(
+                    f"Telegram request failed ({type(e).__name__}) "
+                    f"after {attempt} attempt(s)"
+                ) from e
+            # Transient network problem: back off, then try again.
+            time.sleep(RETRY_BASE_DELAY * attempt)
+            continue
+
+        if resp.status_code == 200:
+            return
+
+        if resp.status_code == 429 and attempt < attempts:
+            time.sleep(_retry_after_seconds(resp))
+            continue
+
+        # Any other status is not worth retrying within this run.
+        raise TelegramSendError(
+            f"Telegram API error HTTP {resp.status_code}: {_status_description(resp)}"
+        )
+
+
+def _retry_after_seconds(resp: requests.Response) -> float:
+    raw = resp.headers.get("Retry-After", "")
+    try:
+        seconds = float(raw)
+    except ValueError:
+        return RETRY_BASE_DELAY
+    if seconds <= 0:
+        return RETRY_BASE_DELAY
+    return min(seconds, MAX_RETRY_AFTER)
+
+
+def _status_description(resp: requests.Response) -> str:
+    try:
+        return str(resp.json().get("description", "")) or "no description"
+    except ValueError:
+        return "no description"
 
 
 def format_message(group_name: str, feed_title: str, title: str, link: str) -> str:
@@ -212,13 +278,20 @@ def process_feed(
 
     for key, title, link in newly_detected:
         if dry_run:
-           mark_seen(conn, group_name, feed_url, key)
-           sent += 1
-           continue
+            mark_seen(conn, group_name, feed_url, key)
+            sent += 1
+            continue
+
+        if sent > 0:
+            # Telegram throttles around one message per second per chat.
+            time.sleep(MESSAGE_PACING)
 
         msg = format_message(group_name, feed_title, title, link)
         send_telegram(bot_token, chat_id, msg)
+        # Mark seen and commit right away: once a message has been sent it
+        # must never be re-sent, even if the process dies immediately after.
         mark_seen(conn, group_name, feed_url, key)
+        conn.commit()
         sent += 1
 
     conn.commit()
@@ -272,7 +345,9 @@ def run(
                 total_sent += sent
                 print(f"  {feed_url} -> detected={detected}, sent={sent}")
             except Exception as e:
-                print(f"  ERROR for {feed_url}: {e}", file=sys.stderr)
+                # Last-ditch scrub: no exception text may carry the bot token.
+                message = str(e).replace(bot_token, "<redacted bot token>")
+                print(f"  ERROR for {feed_url}: {message}", file=sys.stderr)
 
     conn.close()
     print(f"Done. detected={total_detected}, sent={total_sent}")
