@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rsswatch"
+version = "1.0.0"
+description = "Lightweight deterministic RSS monitor that pushes new posts to a Telegram chat"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Radek Svítil" }]
+requires-python = ">=3.9"
+keywords = ["rss", "atom", "telegram", "monitor", "feed", "watcher"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "feedparser>=6.0",
+    "requests>=2.25",
+]
+
+[project.scripts]
+rsswatch = "rss_watch:main"
+
+[tool.setuptools]
+py-modules = ["rss_watch"]
+
+[dependency-groups]
+test = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -4,3 +4,6 @@ rss_state.db-*
 __pycache__/
 secrets.json
 rss_watch.log
+dist/
+build/
+*.egg-info/
