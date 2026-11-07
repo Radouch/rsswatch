@@ -14,6 +14,7 @@ import requests
 
 
 DEFAULT_DB_PATH = "rss_state.db"
+SECRETS_FILENAME = "secrets.json"
 USER_AGENT = "rss-watch/1.0 (+lightweight deterministic RSS monitor)"
 
 
@@ -42,10 +43,12 @@ def load_config(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    if "telegram" not in data:
-        raise ValueError("Missing 'telegram' section in config")
-    if "bot_token" not in data["telegram"] or "chat_id" not in data["telegram"]:
-        raise ValueError("Missing telegram.bot_token or telegram.chat_id in config")
+    if "telegram" in data:
+        print(
+            "Warning: 'telegram' section in config is ignored; "
+            "credentials are read from the secrets file instead",
+            file=sys.stderr,
+        )
 
     if "groups" not in data or not isinstance(data["groups"], list):
         raise ValueError("Missing or invalid 'groups' list in config")
@@ -57,6 +60,21 @@ def load_config(path: str) -> Dict[str, Any]:
             raise ValueError(f"Group {group.get('name', '<unnamed>')} has invalid 'feeds'")
 
     return data
+
+
+def load_secrets(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    telegram = data.get("telegram")
+    if not isinstance(telegram, dict):
+        raise ValueError(f"Missing 'telegram' section in secrets file {path}")
+    if "bot_token" not in telegram or "chat_id" not in telegram:
+        raise ValueError(
+            f"Missing telegram.bot_token or telegram.chat_id in secrets file {path}"
+        )
+
+    return telegram
 
 
 def normalize_url(url: str) -> str:
@@ -207,10 +225,21 @@ def process_feed(
     return (len(newly_detected), sent)
 
 
-def run(config_path: str, db_path: str, only_group: Optional[str], dry_run: bool) -> int:
+def run(
+    config_path: str,
+    db_path: str,
+    only_group: Optional[str],
+    dry_run: bool,
+    secrets_path: Optional[str] = None,
+) -> int:
     config = load_config(config_path)
-    telegram = config["telegram"]
-    bot_token = telegram["bot_token"]
+
+    if secrets_path is None:
+        secrets_path = os.path.join(
+            os.path.dirname(os.path.abspath(config_path)), SECRETS_FILENAME
+        )
+    telegram = load_secrets(secrets_path)
+    bot_token = str(telegram["bot_token"]).strip()
     chat_id = str(telegram["chat_id"])
 
     conn = sqlite3.connect(db_path)
@@ -268,6 +297,12 @@ def parse_args() -> argparse.Namespace:
         help="Only process one named group",
     )
     parser.add_argument(
+        "--secrets",
+        default=None,
+        help="Path to JSON secrets file with the Telegram credentials "
+        "(default: secrets.json next to the config file)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Check feeds and update state, but do not send Telegram messages",
@@ -282,6 +317,7 @@ def main() -> int:
         db_path=args.db,
         only_group=args.group,
         dry_run=args.dry_run,
+        secrets_path=args.secrets,
     )
 
 
