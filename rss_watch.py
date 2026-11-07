@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import calendar
 import hashlib
 import json
 import os
@@ -22,6 +23,7 @@ SEND_ATTEMPTS = 3           # attempts per Telegram message
 RETRY_BASE_DELAY = 2.0      # seconds, exponential-ish backoff base
 MAX_RETRY_AFTER = 120.0     # cap for Telegram's Retry-After hint
 MESSAGE_PACING = 1.0        # seconds between consecutive sent messages
+RETENTION_DAYS = 180        # seen_posts rows older than this are pruned
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -92,12 +94,14 @@ def entry_key(entry: Any) -> str:
         entry.get("id"),
         entry.get("guid"),
         entry.get("link"),
-        entry.get("title"),
     ]
     for c in candidates:
         if c:
             return str(c)
 
+    # No stable identity available: derive one from the entry's full content
+    # instead of the title alone, so two same-titled entries cannot hide
+    # each other. Truly identical entries still deduplicate.
     raw = json.dumps(dict(entry), sort_keys=True, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -106,7 +110,9 @@ def entry_time(entry: Any) -> int:
     for field in ("published_parsed", "updated_parsed", "created_parsed"):
         parsed = entry.get(field)
         if parsed:
-            return int(time.mktime(parsed))
+            # feedparser timestamps are UTC time tuples; time.mktime would
+            # interpret them as local time, so use calendar.timegm.
+            return int(calendar.timegm(parsed))
     return 0
 
 
@@ -146,6 +152,20 @@ def mark_seen(conn: sqlite3.Connection, group_name: str, feed_url: str, key: str
         """,
         (group_name, feed_url, key, int(time.time())),
     )
+
+
+def prune_seen_posts(
+    conn: sqlite3.Connection, retention_days: int = RETENTION_DAYS
+) -> int:
+    """Delete seen_posts rows whose seen_at is older than the retention.
+
+    feed_init rows are deliberately never pruned: losing them would
+    re-baseline a feed and silently swallow all of its entries.
+    """
+    cutoff = int(time.time()) - retention_days * 86400
+    cur = conn.execute("DELETE FROM seen_posts WHERE seen_at < ?", (cutoff,))
+    conn.commit()
+    return cur.rowcount
 
 
 def fetch_feed(feed_url: str) -> Any:
@@ -348,6 +368,10 @@ def run(
                 # Last-ditch scrub: no exception text may carry the bot token.
                 message = str(e).replace(bot_token, "<redacted bot token>")
                 print(f"  ERROR for {feed_url}: {message}", file=sys.stderr)
+
+    pruned = prune_seen_posts(conn)
+    if pruned:
+        print(f"Pruned {pruned} seen_posts rows older than {RETENTION_DAYS} days")
 
     conn.close()
     print(f"Done. detected={total_detected}, sent={total_sent}")
