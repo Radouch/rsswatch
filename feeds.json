@@ -1,15 +1,8 @@
 {
-  "telegram": {
-    "bot_token": "REDACTED_BOT_TOKEN",
-    "chat_id": "5769254032"
-  },
   "groups": [
     {
       "name": "hourly",
-      "feeds": [
-        "https://feeds.bbci.co.uk/news/world/rss.xml",
-        "https://feeds.bbci.co.uk/news/world/europe/rss.xml"
-      ]
+      "feeds": []
     },
     {
       "name": "daily",
